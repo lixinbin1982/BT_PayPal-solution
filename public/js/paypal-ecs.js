@@ -47,10 +47,19 @@ const PayPalECS = (() => {
     const res = await fetch("/api/paypal/orders", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ items: getItems() })
+      body: JSON.stringify({
+        items: getItems(),
+        // App Switch: PayPal must return the buyer to THIS page so the SDK
+        // session can resume() and fire onApprove here (the app reopens the
+        // returnUrl without a ?token= param, unlike the redirect flow).
+        returnPath: location.pathname + location.search
+      })
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || "Order creation failed");
+    // Fallback for returns that lose SDK session state: remember the order
+    // so checkout.html can recover it via ?paypalReturn=true.
+    try { sessionStorage.setItem("ppOrderId", data.id); } catch (e) {}
     return { orderId: data.id };
   }
 

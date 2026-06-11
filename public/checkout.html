@@ -153,7 +153,13 @@
   <script src="/js/braintree-checkout.js"></script>
   <script>
     const params = new URLSearchParams(location.search);
-    const paypalOrderId = params.get("paypalOrderId") || params.get("token"); // "token" comes back on redirect/app-switch returns
+    // Order id arrives as ?paypalOrderId= (our onApprove redirect) or ?token=
+    // (PayPal web-redirect returns). App Switch returns carry NO token, so as
+    // a last resort recover the order saved in sessionStorage at creation.
+    const paypalOrderId =
+      params.get("paypalOrderId") ||
+      params.get("token") ||
+      (params.get("paypalReturn") ? sessionStorage.getItem("ppOrderId") : null);
 
     function summaryHTML(priced, title) {
       return `<h3 style="margin-bottom:10px">${title || "Order Summary"}</h3>

@@ -289,6 +289,17 @@ app.post("/api/paypal/orders", async (req, res) => {
     // ECS: the order is created with the ITEM TOTAL only. Shipping & tax are
     // calculated AFTER approval from the shipping address on the buyer's
     // PayPal account, and the order amount is patched before capture.
+    //
+    // App Switch: the PayPal app reopens returnUrl WITHOUT a ?token= param,
+    // so the return must go back to the page that STARTED the session — the
+    // JS SDK detects it via hasReturned(), resume() fires onApprove(orderId)
+    // there, and only then do we navigate to the checkout review page.
+    const rp = req.body.returnPath;
+    const returnPath =
+      typeof rp === "string" && rp.startsWith("/") && !rp.startsWith("//")
+        ? rp
+        : "/checkout.html";
+    const sep = returnPath.includes("?") ? "&" : "?";
     const { result, ...httpResponse } = await ordersController.createOrder({
       body: {
         intent: CheckoutPaymentIntent.Capture,
@@ -312,7 +323,7 @@ app.post("/api/paypal/orders", async (req, res) => {
               brandName: "LumenX Tactical",
               userAction: "CONTINUE", // ECS: review on merchant site before pay
               shippingPreference: "GET_FROM_FILE",
-              returnUrl: `${baseUrl(req)}/checkout.html?paypalReturn=true`,
+              returnUrl: `${baseUrl(req)}${returnPath}${sep}paypalReturn=true`,
               cancelUrl: `${baseUrl(req)}/cart.html?paypalCancel=true`
             }
           }
