@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Shopping Cart - LumenX Tactical</title>
+  <link rel="stylesheet" href="/css/style.css" />
+  <!-- PayPal JS SDK v6 (sandbox) -->
+  <script src="https://www.sandbox.paypal.com/web-sdk/v6/core" defer></script>
+  <!-- Braintree JS (Google Pay / Apple Pay express buttons) -->
+  <script src="https://js.braintreegateway.com/web/3.142.0/js/client.min.js"></script>
+  <script src="https://js.braintreegateway.com/web/3.142.0/js/data-collector.min.js"></script>
+  <script src="https://js.braintreegateway.com/web/3.142.0/js/google-payment.min.js"></script>
+  <script src="https://js.braintreegateway.com/web/3.142.0/js/apple-pay.min.js"></script>
+  <script src="https://pay.google.com/gp/p/js/pay.js"></script>
+</head>
+<body>
+  <header>
+    <div class="nav">
+      <a class="logo" href="/">LUMEN<span>X</span></a>
+      <nav class="nav-links"><a href="/#products">Flashlights</a></nav>
+      <span class="sandbox-pill">Sandbox Demo</span>
+      <a class="cart-link" href="#" onclick="ApiConsole.toggle();return false">📜 API Console</a>
+      <a class="cart-link" href="/cart.html">🛒 Cart <span class="cart-count">0</span></a>
+    </div>
+  </header>
+
+  <main class="container">
+    <h2 class="section">Shopping Cart</h2>
+    <div id="cart-content"></div>
+    <div id="paypal-status" class="hidden"></div>
+  </main>
+
+  <footer>LumenX Tactical — sandbox demo. No real charges are made.</footer>
+
+  <script src="/js/store.js"></script>
+  <script src="/js/api-console.js"></script>
+  <script src="/js/paypal-ecs.js"></script>
+  <script src="/js/express-wallets.js"></script>
+  <script>
+    async function renderCart() {
+      const products = await Store.loadCatalog();
+      const items = Store.cartItems();
+      const wrap = document.getElementById("cart-content");
+
+      if (!items.length) {
+        wrap.innerHTML = `<div class="empty">
+          <p style="font-size:40px">🛒</p>
+          <p>Your cart is empty.</p><br/>
+          <a class="btn" href="/#products">Browse Flashlights</a></div>`;
+        return;
+      }
+
+      const priced = await fetch("/api/cart/price", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ items })
+      }).then((r) => r.json());
+
+      const rows = items.map(({ id, qty }) => {
+        const p = products.find((x) => x.id === id);
+        return `<tr>
+          <td><div class="cart-item">
+            <div class="mini">${Store.thumbSVG(p, 128, 96)}</div>
+            <div><a href="/product.html?id=${p.id}"><strong>${p.name}</strong></a>
+            <div class="muted">${Store.money(p.price)} each</div></div>
+          </div></td>
+          <td><input type="number" min="0" max="99" value="${qty}" style="width:64px;padding:8px;background:var(--bg-elev);color:var(--text);border:1px solid var(--border);border-radius:8px"
+              onchange="Store.setQty('${p.id}', parseInt(this.value)||0); renderCart();" /></td>
+          <td><strong>${Store.money(p.price * qty)}</strong></td>
+          <td><button class="link-btn" onclick="Store.setQty('${p.id}',0);renderCart();">Remove</button></td>
+        </tr>`;
+      }).join("");
+
+      wrap.innerHTML = `
+      <div class="cart-layout">
+        <div>
+          <table class="cart-table">
+            <thead><tr><th>Product</th><th>Qty</th><th>Subtotal</th><th></th></tr></thead>
+            <tbody>${rows}</tbody>
+          </table>
+        </div>
+        <div class="summary">
+          <div class="line"><span>Items</span><span>$${priced.itemTotal}</span></div>
+          <div class="line"><span>Shipping ${priced.shipping === "0.00" ? "(free over $150)" : ""}</span><span>$${priced.shipping}</span></div>
+          <div class="line"><span>Tax (8.75%)</span><span>$${priced.tax}</span></div>
+          <div class="line total"><span>Total</span><span>$${priced.total}</span></div>
+          <br/>
+          <a class="btn block" href="/checkout.html">Proceed to Checkout</a>
+          <div class="pay-divider">or express checkout</div>
+          <!-- ECS shortcut from cart page: JSv6 custom button via the SDK's
+               <sdk-custom-button-wrapper> (same integration + style as the
+               jsv6-test custom-button demo). Continue flow. -->
+          <sdk-custom-button-wrapper funding-source="paypal">
+            <button id="paypal-custom-btn" class="paypal-custom-btn" hidden>
+              <span class="pcb-overlay"></span>
+              <span class="pcb-content"><span class="pcb-icon">🔦</span><span>PayPal</span></span>
+            </button>
+          </sdk-custom-button-wrapper>
+          <!-- PayPal Pay Later message (v6 paypal-messages, auto-bootstrap) -->
+          <paypal-message auto-bootstrap amount="${priced.total}" currency-code="USD"></paypal-message>
+          <!-- Google Pay / Apple Pay express buttons (Braintree) -->
+          <div id="express-wallets" class="express-wallets">
+            <div id="googlepay-button" class="wallet-btn hidden"></div>
+            <div id="applepay-button" class="wallet-btn hidden"></div>
+          </div>
+        </div>
+      </div>`;
+    }
+
+    window.addEventListener("load", async () => {
+      // Buyer cancelled inside the PayPal app/sheet and was returned here
+      if (new URLSearchParams(location.search).get("paypalCancel")) {
+        const el = document.getElementById("paypal-status");
+        el.textContent = "PayPal checkout was cancelled. Your cart is unchanged.";
+        el.className = "alert info";
+      }
+      await renderCart();
+      const getItems = () => Store.cartItems();
+      await Promise.all([
+        PayPalECS.init({ pageType: "cart", getItems }),
+        // Cart page: complete DIRECTLY in the wallet sheet (shipping method
+        // picked via the sheet's callback) — no merchant review page.
+        Store.cartItems().length ? ExpressWallets.init({ getItems, flow: "direct" }) : null
+      ]);
+    });
+  </script>
+</body>
+</html>

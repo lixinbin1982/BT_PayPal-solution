@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>LumenX Tactical - Illuminate Everything</title>
+  <link rel="stylesheet" href="/css/style.css" />
+</head>
+<body>
+  <header>
+    <div class="nav">
+      <a class="logo" href="/">LUMEN<span>X</span></a>
+      <nav class="nav-links">
+        <a href="/#products">Flashlights</a>
+        <a href="/#products">EDC</a>
+        <a href="/#products">Headlamps</a>
+      </nav>
+      <span class="sandbox-pill">Sandbox Demo</span>
+      <a class="cart-link" href="#" onclick="ApiConsole.toggle();return false">📜 API Console</a>
+      <a class="cart-link" href="/cart.html">🛒 Cart <span class="cart-count">0</span></a>
+    </div>
+  </header>
+
+  <main class="container">
+    <section class="hero">
+      <h1>Light Up the Dark.<br /><em>Own the Night.</em></h1>
+      <p>Professional-grade tactical flashlights, EDC lights and headlamps.
+         Demo store showcasing PayPal JS SDK v6 + Braintree payments in sandbox.</p>
+      <a class="btn" href="#products">Shop the Collection</a>
+      <a class="btn secondary" href="/cart.html" style="margin-left:10px">View Cart</a>
+    </section>
+
+    <h2 class="section" id="products">Featured Lights</h2>
+    <div class="grid" id="product-grid"></div>
+  </main>
+
+  <footer>
+    LumenX Tactical — demo store for PayPal &amp; Braintree sandbox integration testing. No real charges are made.
+  </footer>
+
+  <script src="/js/store.js"></script>
+  <script src="/js/api-console.js"></script>
+  <script>
+    Store.loadCatalog().then((products) => {
+      document.getElementById("product-grid").innerHTML =
+        products.map(Store.productCard).join("");
+    });
+  </script>
+</body>
+</html>

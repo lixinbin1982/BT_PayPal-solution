@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Product - LumenX Tactical</title>
+  <link rel="stylesheet" href="/css/style.css" />
+  <!-- PayPal JS SDK v6 (sandbox) -->
+  <script src="https://www.sandbox.paypal.com/web-sdk/v6/core" defer></script>
+  <!-- Braintree JS (Google Pay / Apple Pay express buttons) -->
+  <script src="https://js.braintreegateway.com/web/3.142.0/js/client.min.js"></script>
+  <script src="https://js.braintreegateway.com/web/3.142.0/js/data-collector.min.js"></script>
+  <script src="https://js.braintreegateway.com/web/3.142.0/js/google-payment.min.js"></script>
+  <script src="https://js.braintreegateway.com/web/3.142.0/js/apple-pay.min.js"></script>
+  <script src="https://pay.google.com/gp/p/js/pay.js"></script>
+</head>
+<body>
+  <header>
+    <div class="nav">
+      <a class="logo" href="/">LUMEN<span>X</span></a>
+      <nav class="nav-links"><a href="/#products">Flashlights</a></nav>
+      <span class="sandbox-pill">Sandbox Demo</span>
+      <a class="cart-link" href="#" onclick="ApiConsole.toggle();return false">📜 API Console</a>
+      <a class="cart-link" href="/cart.html">🛒 Cart <span class="cart-count">0</span></a>
+    </div>
+  </header>
+
+  <main class="container">
+    <div class="product-layout" id="product-detail"></div>
+    <div id="paypal-status" class="hidden"></div>
+  </main>
+
+  <footer>LumenX Tactical — sandbox demo. No real charges are made.</footer>
+
+  <script src="/js/store.js"></script>
+  <script src="/js/api-console.js"></script>
+  <script src="/js/paypal-ecs.js"></script>
+  <script src="/js/express-wallets.js"></script>
+  <script>
+    let currentProduct = null;
+
+    function getQty() {
+      const v = parseInt(document.getElementById("qty")?.value, 10);
+      return isNaN(v) || v < 1 ? 1 : v;
+    }
+
+    async function renderProduct() {
+      const id = new URLSearchParams(location.search).get("id");
+      const products = await Store.loadCatalog();
+      currentProduct = products.find((p) => p.id === id) || products[0];
+      const p = currentProduct;
+
+      document.title = `${p.name} - LumenX Tactical`;
+      document.getElementById("product-detail").innerHTML = `
+        <div class="product-hero">${Store.thumbSVG(p, 600, 460)}</div>
+        <div class="product-info">
+          <h1>${p.name}</h1>
+          <div class="tagline">${p.tagline}</div>
+          <span class="price">${Store.money(p.price)}</span>
+          <!-- PayPal Pay Later message (v6 paypal-messages, auto-bootstrap) -->
+          <paypal-message auto-bootstrap amount="${p.price.toFixed(2)}" currency-code="USD"></paypal-message>
+          <p class="muted">${p.description}</p>
+          <ul class="specs">${p.specs.map((s) => `<li>${s}</li>`).join("")}</ul>
+          <div class="qty-row">
+            <label class="muted" for="qty">Qty</label>
+            <input id="qty" type="number" min="1" max="99" value="1" onchange="PayPalECS.updateMessageAmount()" />
+            <button class="btn" onclick="Store.addToCart(currentProduct.id, getQty());Store.toast('Added to cart')">Add to Cart</button>
+          </div>
+          <div class="pay-divider">or express checkout</div>
+          <!-- JSv6 custom button: the SDK's <sdk-custom-button-wrapper> element
+               wraps a fully merchant-styled button (same integration + style as
+               the jsv6-test custom-button demo). -->
+          <sdk-custom-button-wrapper funding-source="paypal">
+            <button id="paypal-custom-btn" class="paypal-custom-btn" hidden>
+              <span class="pcb-overlay"></span>
+              <span class="pcb-content"><span class="pcb-icon">🔦</span><span>PayPal</span></span>
+            </button>
+          </sdk-custom-button-wrapper>
+          <!-- Google Pay / Apple Pay express buttons (Braintree) -->
+          <div id="express-wallets" class="express-wallets">
+            <div id="googlepay-button" class="wallet-btn hidden"></div>
+            <div id="applepay-button" class="wallet-btn hidden"></div>
+          </div>
+        </div>`;
+    }
+
+    window.addEventListener("load", async () => {
+      await renderProduct();
+      // Buy THIS product directly (express checkout shortcut from product page)
+      const getItems = () => [{ id: currentProduct.id, qty: getQty() }];
+      await Promise.all([
+        PayPalECS.init({ pageType: "product-details", getItems }),
+        ExpressWallets.init({ getItems })
+      ]);
+    });
+  </script>
+</body>
+</html>

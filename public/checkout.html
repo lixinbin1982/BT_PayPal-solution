@@ -1,0 +1,416 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Checkout - LumenX Tactical</title>
+  <link rel="stylesheet" href="/css/style.css" />
+
+  <!-- PayPal JS SDK v6 (Pay Later messaging) -->
+  <script src="https://www.sandbox.paypal.com/web-sdk/v6/core" defer></script>
+  <!-- Braintree JS SDKs -->
+  <script src="https://js.braintreegateway.com/web/dropin/1.44.1/js/dropin.min.js"></script>
+  <script src="https://js.braintreegateway.com/web/3.142.0/js/client.min.js"></script>
+  <script src="https://js.braintreegateway.com/web/3.142.0/js/data-collector.min.js"></script>
+  <script src="https://js.braintreegateway.com/web/3.142.0/js/fastlane.min.js"></script>
+  <!-- Google Pay base library (needed by Drop-in's Google Pay) -->
+  <script src="https://pay.google.com/gp/p/js/pay.js"></script>
+</head>
+<body>
+  <header>
+    <div class="nav">
+      <a class="logo" href="/">LUMEN<span>X</span></a>
+      <span class="sandbox-pill">Sandbox Demo</span>
+      <a class="cart-link" href="#" onclick="ApiConsole.toggle();return false">📜 API Console</a>
+      <a class="cart-link" href="/cart.html">🛒 Cart <span class="cart-count">0</span></a>
+    </div>
+  </header>
+
+  <main class="container">
+    <h2 class="section">Checkout</h2>
+
+    <!-- ============ MODE A: PayPal order review (ECS continue) ============ -->
+    <div id="paypal-review" class="hidden">
+      <div class="checkout-layout">
+        <div>
+          <div class="panel">
+            <h3><span class="step">✓</span> PayPal approved — review your order</h3>
+            <p class="muted">You approved this payment in PayPal (Continue flow).
+              Nothing has been charged yet. Confirm below to capture the payment.</p>
+            <div class="review-box" id="paypal-review-details">Loading order details…</div>
+            <div class="field">
+              <label>Shipping method</label>
+              <div id="paypal-shipping-options"></div>
+            </div>
+            <div id="paypal-capture-status" class="hidden"></div>
+            <button class="btn green block" id="paypal-capture-btn">Complete Purchase — Pay Now</button>
+          </div>
+        </div>
+        <div class="summary" id="paypal-summary"></div>
+      </div>
+    </div>
+
+    <!-- ===== MODE C: Wallet review (Google Pay / Apple Pay — ECS continue) ===== -->
+    <div id="wallet-review" class="hidden">
+      <div class="checkout-layout">
+        <div>
+          <div class="panel">
+            <h3><span class="step">✓</span> <span id="wallet-type">Wallet</span> approved — review your order</h3>
+            <p class="muted">You approved this payment in the wallet sheet.
+              Nothing has been charged yet. Confirm below to complete the purchase.</p>
+            <div class="review-box" id="wallet-review-details">Loading…</div>
+            <div class="field">
+              <label>Shipping method</label>
+              <div id="wallet-shipping-options"></div>
+            </div>
+            <div id="wallet-status" class="hidden"></div>
+            <button class="btn green block" id="wallet-pay-btn">Complete Purchase — Pay Now</button>
+          </div>
+        </div>
+        <div class="summary" id="wallet-summary"></div>
+      </div>
+    </div>
+
+    <!-- ============ MODE B: Braintree payment selection ============ -->
+    <div id="braintree-checkout" class="hidden">
+      <div class="checkout-layout">
+        <div>
+          <!-- Step 1: Fastlane email lookup -->
+          <div class="panel" id="fastlane-section" >
+            <h3><span class="step">1</span> Fastlane — accelerated checkout
+              <span class="muted" style="font-weight:400;font-size:12px">by PayPal / Braintree</span></h3>
+            <p class="muted">Enter your email — lookup happens automatically. Recognized Fastlane
+              members verify with a one-time code; their saved shipping address fills step 2
+              and they pay with their saved card. New customers can enroll at purchase.</p>
+            <br/>
+            <div class="fastlane-row">
+              <input id="fastlane-email" type="email" placeholder="email@example.com" autocomplete="email"
+                style="padding:11px 12px;width:100%;max-width:340px;background:var(--bg-elev);color:var(--text);border:1px solid var(--border);border-radius:8px;font-size:14px" />
+              <span id="fastlane-lookup-spinner" class="muted hidden">Looking up…</span>
+            </div>
+            <div id="fastlane-watermark"></div>
+            <div id="fastlane-unavailable" class="alert info hidden">
+              Fastlane is not enabled on this Braintree sandbox account — use the payment methods below.
+            </div>
+            <div id="fastlane-pay-wrap" class="hidden">
+              <div id="fastlane-payment-container" style="margin:16px 0"></div>
+              <button class="btn green block" onclick="BTCheckout.payWithFastlane()">Pay with Fastlane</button>
+            </div>
+          </div>
+
+          <!-- Step 2: Shipping (prefilled from the Fastlane profile on lookup success) -->
+          <div class="panel">
+            <h3><span class="step">2</span> Shipping Address</h3>
+            <div id="fastlane-prefilled" class="alert success hidden">
+              Shipping address filled from your Fastlane profile.
+            </div>
+            <div class="field-row">
+              <div class="field"><label>First name</label><input id="ship-first" value="Demo" /></div>
+              <div class="field"><label>Last name</label><input id="ship-last" value="Buyer" /></div>
+            </div>
+            <div class="field"><label>Street address</label><input id="ship-street" value="1 Main St" /></div>
+            <div class="field-row">
+              <div class="field"><label>City</label><input id="ship-city" value="San Jose" /></div>
+              <div class="field"><label>State</label><input id="ship-state" value="CA" /></div>
+            </div>
+            <div class="field" style="max-width:200px"><label>ZIP</label><input id="ship-zip" value="95131" /></div>
+            <div class="field">
+              <label>Shipping method</label>
+              <div id="shipping-options"></div>
+            </div>
+          </div>
+
+          <!-- Drop-in: card / Venmo / Google Pay / Apple Pay -->
+          <div class="panel">
+            <h3><span class="step">3</span> Other payment methods</h3>
+            <p class="muted">Card (Drop-in), Venmo, Google Pay and Apple Pay via Braintree.</p>
+            <div id="dropin-container"></div>
+            <div id="bt-status" class="hidden"></div>
+            <button class="btn block" id="dropin-pay-btn" disabled onclick="BTCheckout.payWithDropin()">
+              Pay Now
+            </button>
+            <p class="muted" style="margin-top:10px">
+              Sandbox test card: 4111 1111 1111 1111 — any future expiry, any CVV.
+            </p>
+          </div>
+        </div>
+
+        <div class="summary" id="bt-summary"></div>
+      </div>
+    </div>
+
+    <div id="checkout-empty" class="empty hidden">
+      <p style="font-size:40px">🛒</p>
+      <p>Your cart is empty.</p><br/>
+      <a class="btn" href="/#products">Browse Flashlights</a>
+    </div>
+  </main>
+
+  <footer>LumenX Tactical — sandbox demo. No real charges are made.</footer>
+
+  <script src="/js/store.js"></script>
+  <script src="/js/api-console.js"></script>
+  <script src="/js/braintree-checkout.js"></script>
+  <script>
+    const params = new URLSearchParams(location.search);
+    const paypalOrderId = params.get("paypalOrderId") || params.get("token"); // "token" comes back on redirect/app-switch returns
+
+    function summaryHTML(priced, title) {
+      return `<h3 style="margin-bottom:10px">${title || "Order Summary"}</h3>
+        <div class="line"><span>Items</span><span>$${priced.itemTotal}</span></div>
+        <div class="line"><span>Shipping</span><span>$${priced.shipping}</span></div>
+        <div class="line"><span>Tax</span><span>$${priced.tax}</span></div>
+        <div class="line total"><span>Total</span><span>$${priced.total}</span></div>`;
+    }
+
+    /* ---------- MODE A: PayPal review + capture ---------- */
+    async function initPayPalReview(shippingMethod) {
+      document.getElementById("paypal-review").classList.remove("hidden");
+      const detailsEl = document.getElementById("paypal-review-details");
+      const summaryEl = document.getElementById("paypal-summary");
+
+      // ECS: read the shipping address from the buyer's PayPal account,
+      // calculate shipping + tax for it, and PATCH the order amount.
+      // Re-called with a shippingMethod when the buyer changes the option.
+      let order = await fetch(`/api/paypal/orders/${paypalOrderId}/update-shipping`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ shippingMethod: shippingMethod || "standard" })
+      })
+        .then((r) => r.json())
+        .catch((e) => ({ error: e.message })); // 404/non-JSON -> fall back below
+      if (order.error) {
+        // Fallback: show the order as-is if the update failed
+        console.warn("update-shipping failed, loading order as-is:", order);
+        order = await fetch(`/api/paypal/orders/${paypalOrderId}`).then((r) => r.json());
+      }
+      if (order.error) {
+        detailsEl.innerHTML = `<span style="color:var(--red)">Could not load order: ${JSON.stringify(order.details || order.error)}</span>`;
+        return;
+      }
+
+      // Shipping method selector — picking one re-patches the order amount
+      const optWrap = document.getElementById("paypal-shipping-options");
+      if (optWrap && order.shipping_options) {
+        optWrap.innerHTML = order.shipping_options.map((o) => `
+          <label class="ship-opt">
+            <input type="radio" name="pp-ship-method" value="${o.id}" ${o.id === order.selected_shipping_method ? "checked" : ""} />
+            <span>${o.label} <span class="muted">— ${o.detail}</span></span>
+            <strong>${o.amount === "0.00" ? "FREE" : "$" + o.amount}</strong>
+          </label>`).join("");
+        optWrap.querySelectorAll('input[name="pp-ship-method"]').forEach((r) =>
+          r.addEventListener("change", () => initPayPalReview(r.value))
+        );
+      }
+
+      const pu = order.purchase_units && order.purchase_units[0];
+      const payer = order.payer || {};
+      const ship = (pu && pu.shipping) || {};
+      const addr = ship.address || {};
+      const amount = (pu && pu.amount) || {};
+      const breakdown = amount.breakdown || {};
+
+      detailsEl.innerHTML = `
+        <p><span class="k">Order ID</span> <code>${order.id}</code></p>
+        <p><span class="k">Status</span> ${order.status}</p>
+        <p><span class="k">Payer</span> ${(payer.name && payer.name.given_name) || ""} ${(payer.name && payer.name.surname) || ""} — ${payer.email_address || ""}</p>
+        <p><span class="k">Ship to</span> ${(ship.name && ship.name.full_name) || ""}, ${addr.address_line_1 || ""} ${addr.admin_area_2 || ""} ${addr.admin_area_1 || ""} ${addr.postal_code || ""} ${addr.country_code || ""}</p>
+        <p class="muted" style="margin-top:8px">Shipping &amp; tax were calculated from the shipping
+          address on your PayPal account and the order total was updated before capture.</p>`;
+
+      summaryEl.innerHTML = summaryHTML({
+        itemTotal: (breakdown.item_total && breakdown.item_total.value) || amount.value,
+        shipping: (breakdown.shipping && breakdown.shipping.value) || "0.00",
+        tax: (breakdown.tax_total && breakdown.tax_total.value) || "0.00",
+        total: amount.value
+      }, "PayPal Order");
+
+      // onclick (not addEventListener) so re-renders don't stack handlers
+      document.getElementById("paypal-capture-btn").onclick = (async (e) => {
+        const btn = e.target;
+        btn.disabled = true;
+        const st = document.getElementById("paypal-capture-status");
+        st.className = "alert info"; st.textContent = "Capturing payment…";
+        try {
+          const res = await fetch(`/api/paypal/orders/${paypalOrderId}/capture`, { method: "POST" });
+          const cap = await res.json();
+          if (!res.ok) throw new Error(JSON.stringify(cap.details || cap.error));
+          Store.clearCart();
+          window.location.href = `/status.html?type=paypal&id=${encodeURIComponent(paypalOrderId)}`;
+        } catch (err) {
+          st.className = "alert error";
+          st.textContent = `Capture failed: ${err.message}`;
+          btn.disabled = false;
+        }
+      });
+    }
+
+    /* ---------- MODE C: Wallet (Google Pay / Apple Pay) review ---------- */
+    async function initWalletReview() {
+      let saved = null;
+      try { saved = JSON.parse(sessionStorage.getItem("lumenx_wallet_review")); } catch (e) {}
+      if (!saved || !saved.nonce) return initBraintree(); // nothing stashed -> normal checkout
+      document.getElementById("wallet-review").classList.remove("hidden");
+      document.getElementById("wallet-type").textContent = saved.type;
+      const s = saved.shipping || {};
+      // Items stashed by the wallet flow (product page = buy-now item, not the cart)
+      const walletItems = (saved.items && saved.items.length) ? saved.items : Store.cartItems();
+
+      async function render(methodId) {
+        if (methodId) saved.shippingMethod = methodId;
+        const priced = await fetch("/api/cart/price", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            items: walletItems,
+            state: s.region,
+            shippingMethod: saved.shippingMethod
+          })
+        }).then((r) => r.json());
+        if (priced.error) {
+          document.getElementById("wallet-review-details").innerHTML =
+            `<span style="color:var(--red)">${priced.error}</span>`;
+          return;
+        }
+
+        document.getElementById("wallet-review-details").innerHTML = `
+          <p><span class="k">Method</span> ${saved.type}</p>
+          <p><span class="k">Ship to</span> ${s.firstName || ""} ${s.lastName || ""},
+            ${s.streetAddress || ""} ${s.locality || ""} ${s.region || ""} ${s.postalCode || ""} ${s.countryCode || ""}</p>
+          <p class="muted" style="margin-top:8px">Shipping &amp; tax were calculated from the
+            shipping address you selected in the ${saved.type} sheet. Nothing is charged until you confirm.</p>`;
+
+        const optWrap = document.getElementById("wallet-shipping-options");
+        optWrap.innerHTML = priced.shippingOptions.map((o) => `
+          <label class="ship-opt">
+            <input type="radio" name="wallet-ship-method" value="${o.id}" ${o.id === priced.shippingMethod ? "checked" : ""} />
+            <span>${o.label} <span class="muted">— ${o.detail}</span></span>
+            <strong>${o.amount === "0.00" ? "FREE" : "$" + o.amount}</strong>
+          </label>`).join("");
+        optWrap.querySelectorAll('input[name="wallet-ship-method"]').forEach((r) =>
+          r.addEventListener("change", () => render(r.value))
+        );
+
+        document.getElementById("wallet-summary").innerHTML = summaryHTML(priced, `${saved.type} Order`);
+      }
+      await render();
+
+      document.getElementById("wallet-pay-btn").onclick = async (e) => {
+        const btn = e.target;
+        btn.disabled = true;
+        const st = document.getElementById("wallet-status");
+        st.className = "alert info"; st.textContent = `Processing ${saved.type} payment…`;
+        try {
+          const res = await fetch("/api/braintree/checkout", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              paymentMethodNonce: saved.nonce,
+              deviceData: saved.deviceData,
+              items: walletItems,
+              shipping: s,
+              shippingMethod: saved.shippingMethod
+            })
+          });
+          const data = await res.json();
+          if (!res.ok || !data.success) throw new Error(data.error || "Transaction failed");
+          sessionStorage.removeItem("lumenx_wallet_review");
+          Store.clearCart();
+          window.location.href = `/status.html?type=braintree&id=${encodeURIComponent(data.transaction.id)}`;
+        } catch (err) {
+          st.className = "alert error";
+          st.textContent = `Transaction failed: ${err.message} — wallet nonces are single-use; start again from the cart if it was already consumed.`;
+          btn.disabled = false;
+        }
+      };
+    }
+
+    /* ---------- MODE B: Braintree ---------- */
+    let shipMethod = "standard"; // selected shipping option (standard/express/overnight)
+
+    async function priceForState(items) {
+      return fetch("/api/cart/price", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          items,
+          state: document.getElementById("ship-state").value,
+          shippingMethod: shipMethod
+        })
+      }).then((r) => r.json());
+    }
+
+    function renderShipOptions(priced) {
+      const wrap = document.getElementById("shipping-options");
+      if (!wrap || !priced.shippingOptions) return;
+      wrap.innerHTML = priced.shippingOptions.map((o) => `
+        <label class="ship-opt">
+          <input type="radio" name="ship-method" value="${o.id}" ${o.id === priced.shippingMethod ? "checked" : ""} />
+          <span>${o.label} <span class="muted">— ${o.detail}</span></span>
+          <strong>${o.amount === "0.00" ? "FREE" : "$" + o.amount}</strong>
+        </label>`).join("");
+      wrap.querySelectorAll('input[name="ship-method"]').forEach((r) =>
+        r.addEventListener("change", () => { shipMethod = r.value; reprice(); })
+      );
+    }
+
+    /** Re-price (state or shipping method changed) and refresh all totals. */
+    async function reprice() {
+      const repriced = await priceForState(Store.cartItems());
+      if (repriced.error) return;
+      document.getElementById("bt-summary").innerHTML = summaryHTML(repriced);
+      renderShipOptions(repriced);
+      const msg = document.querySelector("paypal-message");
+      if (msg) { msg.setAttribute("amount", repriced.total); document.getElementById("bt-summary").appendChild(msg); }
+      BTCheckout.updatePriced(repriced); // updates Drop-in GPay/Apple Pay totals
+    }
+
+    async function initBraintree() {
+      const items = Store.cartItems();
+      if (!items.length) {
+        document.getElementById("checkout-empty").classList.remove("hidden");
+        return;
+      }
+      document.getElementById("braintree-checkout").classList.remove("hidden");
+      const priced = await priceForState(items);
+      document.getElementById("bt-summary").innerHTML = summaryHTML(priced);
+      renderShipOptions(priced);
+      initPayLaterMessage(priced.total);
+
+      // Re-calculate shipping fee + tax when the buyer edits the state
+      document.getElementById("ship-state").addEventListener("change", reprice);
+
+      await BTCheckout.init(priced);
+    }
+
+    /* ---------- PayPal Pay Later message (v6 paypal-messages) ---------- */
+    async function initPayLaterMessage(amount) {
+      try {
+        if (!window.paypal || !window.paypal.createInstance) return;
+        const msg = document.createElement("paypal-message");
+        msg.setAttribute("auto-bootstrap", "");
+        msg.setAttribute("amount", amount);
+        msg.setAttribute("currency-code", "USD");
+        msg.style.marginTop = "14px";
+        document.getElementById("bt-summary").appendChild(msg);
+
+        const { paypalClientId } = await fetch("/api/config").then((r) => r.json());
+        const sdkInstance = await window.paypal.createInstance({
+          clientId: paypalClientId,
+          components: ["paypal-messages"],
+          pageType: "checkout"
+        });
+        sdkInstance.createPayPalMessages();
+      } catch (e) {
+        console.warn("Pay Later message unavailable:", e);
+      }
+    }
+
+    window.addEventListener("load", () => {
+      if (paypalOrderId) initPayPalReview();
+      else if (params.get("walletReview")) initWalletReview();
+      else initBraintree();
+    });
+  </script>
+</body>
+</html>

@@ -1,0 +1,19 @@
+{
+  "name": "lumenx-paypal-braintree-demo",
+  "version": "1.0.0",
+  "description": "Olight-style e-commerce demo: PayPal JS SDK v6 (ECS + App Switch) + Braintree (Drop-in, Venmo, Apple Pay, Google Pay, Fastlane)",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "@paypal/paypal-server-sdk": "^1.1.0",
+    "braintree": "^3.32.0",
+    "dotenv": "^16.4.5",
+    "express": "^4.21.0"
+  }
+}

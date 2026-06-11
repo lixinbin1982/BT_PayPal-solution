@@ -1,0 +1,20 @@
+services:
+  - type: web
+    name: lumenx-paypal-braintree-demo
+    runtime: node
+    plan: free
+    buildCommand: npm install
+    startCommand: npm start
+    envVars:
+      - key: PAYPAL_CLIENT_ID
+        sync: false
+      - key: PAYPAL_CLIENT_SECRET
+        sync: false
+      - key: BT_MERCHANT_ID
+        sync: false
+      - key: BT_PUBLIC_KEY
+        sync: false
+      - key: BT_PRIVATE_KEY
+        sync: false
+      - key: BASE_URL
+        sync: false

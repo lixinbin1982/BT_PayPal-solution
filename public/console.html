@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>API Console - LumenX Tactical</title>
+  <link rel="stylesheet" href="/css/style.css" />
+  <style>
+    .console-bar { display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin-bottom:14px; }
+    .console-bar input[type="text"] {
+      padding:9px 12px; background:var(--bg-elev); color:var(--text);
+      border:1px solid var(--border); border-radius:8px; font-size:13px; min-width:220px;
+    }
+    .pill-btn {
+      padding:7px 14px; border-radius:999px; border:1px solid var(--border);
+      background:var(--bg-elev); color:var(--text-dim); font-size:12px; font-weight:700;
+      cursor:pointer;
+    }
+    .pill-btn.active { color:var(--bg); background:var(--accent); border-color:var(--accent); }
+    .log-table { width:100%; border-collapse:collapse; font-size:13px; }
+    .log-table th {
+      text-align:left; color:var(--text-dim); font-size:11px; text-transform:uppercase;
+      letter-spacing:1px; padding:8px 10px; border-bottom:1px solid var(--border);
+    }
+    .log-row td { padding:9px 10px; border-bottom:1px solid var(--border); cursor:pointer; white-space:nowrap; }
+    .log-row td { border-bottom:none; }
+    .log-route td {
+      padding:0 10px 9px; border-bottom:1px solid var(--border); cursor:pointer;
+      font-size:11.5px; color:var(--text-dim); white-space:normal;
+    }
+    .log-route b { color:var(--accent-2); font-weight:700; }
+    .log-row:hover td { background:var(--bg-elev); }
+    .log-detail td { padding:0 10px 14px; background:var(--bg-elev); }
+    .method { font-weight:800; font-size:11px; padding:2px 8px; border-radius:6px; background:var(--bg-elev); border:1px solid var(--border); }
+    .st-ok { color:var(--green); font-weight:700; }
+    .st-err { color:var(--red); font-weight:700; }
+    .via { color:var(--text-dim); font-size:12px; }
+    pre.json {
+      margin:10px 0 0; padding:12px; background:var(--bg); border:1px solid var(--border);
+      border-radius:8px; color:var(--accent-2); font-size:12px; line-height:1.5;
+      max-height:340px; overflow:auto; white-space:pre-wrap; word-break:break-all;
+    }
+    .json-label { font-size:11px; color:var(--text-dim); text-transform:uppercase; letter-spacing:1px; margin-top:12px; display:block; }
+    .empty-logs { color:var(--text-dim); padding:40px 0; text-align:center; }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="nav">
+      <a class="logo" href="/">LUMEN<span>X</span></a>
+      <span class="sandbox-pill">Sandbox Demo</span>
+      <a class="cart-link" href="/cart.html">🛒 Cart <span class="cart-count">0</span></a>
+    </div>
+  </header>
+
+  <main class="container">
+    <h2 class="section">API History Console</h2>
+    <p class="muted">Every call to the demo server's <code>/api/*</code> endpoints — request and
+      response payloads, status and timing. PayPal calls go through the PayPal Server SDK
+      (Orders v2), Braintree calls through the Braintree Node SDK. Auto-refreshes every 2s.</p>
+    <br/>
+    <div class="panel">
+      <div class="console-bar">
+        <button class="pill-btn active" data-filter="all">All</button>
+        <button class="pill-btn" data-filter="paypal">PayPal</button>
+        <button class="pill-btn" data-filter="braintree">Braintree</button>
+        <button class="pill-btn" data-filter="store">Store</button>
+        <input type="text" id="search" placeholder="Filter by path / payload…" />
+        <button class="pill-btn" id="pause-btn">⏸ Pause</button>
+        <button class="pill-btn" id="clear-btn">🗑 Clear</button>
+        <span class="via" id="count"></span>
+      </div>
+      <table class="log-table">
+        <thead>
+          <tr><th>#</th><th>Time</th><th>Method</th><th>Endpoint</th><th>Via</th><th>Status</th><th>ms</th></tr>
+        </thead>
+        <tbody id="log-body"></tbody>
+      </table>
+      <div class="empty-logs hidden" id="empty-logs">No API calls logged yet — browse the store or run a checkout.</div>
+    </div>
+  </main>
+
+  <footer>LumenX Tactical — sandbox demo. No real charges are made.</footer>
+
+  <script src="/js/store.js"></script>
+  <script>
+    let logs = [];
+    let filter = "all";
+    let search = "";
+    let paused = false;
+    const expanded = new Set();
+
+    function matches(l) {
+      if (filter === "paypal" && !l.path.startsWith("/api/paypal")) return false;
+      if (filter === "braintree" && !l.path.startsWith("/api/braintree")) return false;
+      if (filter === "store" && (l.path.startsWith("/api/paypal") || l.path.startsWith("/api/braintree"))) return false;
+      if (search) {
+        const hay = (l.path + " " + JSON.stringify(l.requestBody || "") + " " + JSON.stringify(l.responseBody || "")).toLowerCase();
+        if (!hay.includes(search)) return false;
+      }
+      return true;
+    }
+
+    function esc(s) {
+      return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    }
+    function pretty(o) {
+      if (o === null || o === undefined) return "—";
+      return esc(JSON.stringify(o, null, 2));
+    }
+
+    function render() {
+      const body = document.getElementById("log-body");
+      const shown = logs.filter(matches).slice().reverse(); // newest first
+      document.getElementById("count").textContent = `${shown.length} of ${logs.length} calls`;
+      document.getElementById("empty-logs").classList.toggle("hidden", logs.length > 0);
+      body.innerHTML = shown.map((l) => {
+        const stCls = l.status >= 200 && l.status < 300 ? "st-ok" : "st-err";
+        const open = expanded.has(l.id);
+        return `
+        <tr class="log-row" data-id="${l.id}">
+          <td>${l.id}</td>
+          <td>${new Date(l.time).toLocaleTimeString()}</td>
+          <td><span class="method">${l.method}</span></td>
+          <td><code>${esc(l.path)}</code></td>
+          <td class="via">${esc(l.via)}</td>
+          <td class="${stCls}">${l.status}</td>
+          <td>${l.durationMs}</td>
+        </tr>
+        <tr class="log-route log-row" data-id="${l.id}">
+          <td colspan="7"><b>${esc(l.from || "Browser")}</b> ➜ <b>${esc(l.to || "?")}</b></td>
+        </tr>
+        ${open ? `
+        <tr class="log-detail"><td colspan="7">
+          <span class="json-label">Request body</span>
+          <pre class="json">${pretty(l.requestBody)}</pre>
+          <span class="json-label">Response body (${l.status})</span>
+          <pre class="json">${pretty(l.responseBody)}</pre>
+        </td></tr>` : ""}`;
+      }).join("");
+      body.querySelectorAll(".log-row").forEach((row) =>
+        row.addEventListener("click", () => {
+          const id = Number(row.dataset.id);
+          expanded.has(id) ? expanded.delete(id) : expanded.add(id);
+          render();
+        })
+      );
+    }
+
+    async function poll() {
+      if (paused) return;
+      try {
+        const since = logs.length ? logs[logs.length - 1].id : 0;
+        const data = await fetch(`/api/logs?since=${since}`).then((r) => r.json());
+        if (data.logs && data.logs.length) {
+          logs = logs.concat(data.logs).slice(-300);
+          render();
+        }
+      } catch (e) { /* server restarting — keep polling */ }
+    }
+
+    document.querySelectorAll("[data-filter]").forEach((b) =>
+      b.addEventListener("click", () => {
+        filter = b.dataset.filter;
+        document.querySelectorAll("[data-filter]").forEach((x) => x.classList.toggle("active", x === b));
+        render();
+      })
+    );
+    document.getElementById("search").addEventListener("input", (e) => {
+      search = e.target.value.trim().toLowerCase();
+      render();
+    });
+    document.getElementById("pause-btn").addEventListener("click", (e) => {
+      paused = !paused;
+      e.target.textContent = paused ? "▶ Resume" : "⏸ Pause";
+    });
+    document.getElementById("clear-btn").addEventListener("click", async () => {
+      await fetch("/api/logs", { method: "DELETE" });
+      logs = [];
+      expanded.clear();
+      render();
+    });
+
+    render();
+    poll();
+    setInterval(poll, 2000);
+  </script>
+</body>
+</html>

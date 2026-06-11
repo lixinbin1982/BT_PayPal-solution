@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Purchase Status - LumenX Tactical</title>
+  <link rel="stylesheet" href="/css/style.css" />
+</head>
+<body>
+  <header>
+    <div class="nav">
+      <a class="logo" href="/">LUMEN<span>X</span></a>
+      <span class="sandbox-pill">Sandbox Demo</span>
+      <a class="cart-link" href="#" onclick="ApiConsole.toggle();return false">📜 API Console</a>
+      <a class="cart-link" href="/cart.html">🛒 Cart <span class="cart-count">0</span></a>
+    </div>
+  </header>
+
+  <main class="container">
+    <div class="status-wrap">
+      <div class="status-icon" id="status-icon">⏳</div>
+      <h1 id="status-title">Checking purchase status…</h1>
+      <p class="muted" id="status-sub"></p>
+      <div class="status-card" id="status-card"></div>
+      <br/>
+      <a class="btn" href="/">Continue Shopping</a>
+    </div>
+  </main>
+
+  <footer>LumenX Tactical — sandbox demo. No real charges are made.</footer>
+
+  <script src="/js/store.js"></script>
+  <script src="/js/api-console.js"></script>
+  <script>
+    const params = new URLSearchParams(location.search);
+    const type = params.get("type");
+    const id = params.get("id");
+    const icon = document.getElementById("status-icon");
+    const title = document.getElementById("status-title");
+    const sub = document.getElementById("status-sub");
+    const card = document.getElementById("status-card");
+
+    const line = (k, v) => `<div class="line"><span>${k}</span><span>${v ?? "—"}</span></div>`;
+    const ok = (s) => ["COMPLETED", "settled", "submitted_for_settlement", "settling", "authorized"].includes(s);
+
+    async function loadPayPal() {
+      const order = await fetch(`/api/paypal/orders/${id}`).then((r) => r.json());
+      if (order.error) return fail(`PayPal order lookup failed`);
+      const pu = (order.purchase_units && order.purchase_units[0]) || {};
+      const cap = pu.payments && pu.payments.captures && pu.payments.captures[0];
+      const success = order.status === "COMPLETED";
+      icon.textContent = success ? "✅" : "⚠️";
+      title.textContent = success ? "Payment Completed!" : `Order status: ${order.status}`;
+      sub.textContent = success ? "Your PayPal sandbox payment was captured successfully." :
+        "The order has not been captured yet.";
+      card.innerHTML =
+        line("Payment method", "PayPal (JS SDK v6 / Server SDK)") +
+        line("Order ID", `<code>${order.id}</code>`) +
+        line("Order status", `<span class="status-badge ${success ? "ok" : "warn"}">${order.status}</span>`) +
+        (cap ? line("Capture ID", `<code>${cap.id}</code>`) + line("Capture status", cap.status) +
+               line("Amount", `${cap.amount.value} ${cap.amount.currency_code}`) : "") +
+        (order.payer ? line("Payer", `${order.payer.email_address || ""}`) : "");
+    }
+
+    async function loadBraintree() {
+      const t = await fetch(`/api/braintree/transactions/${id}`).then((r) => r.json());
+      if (t.error) return fail("Braintree transaction lookup failed");
+      const success = ok(t.status);
+      icon.textContent = success ? "✅" : "⚠️";
+      title.textContent = success ? "Payment Completed!" : `Transaction status: ${t.status}`;
+      sub.textContent = "Processed through the Braintree sandbox gateway.";
+      card.innerHTML =
+        line("Payment method", `Braintree — ${t.paymentInstrumentType || ""}${t.cardType ? ` (${t.cardType} •••• ${t.last4})` : ""}`) +
+        line("Transaction ID", `<code>${t.id}</code>`) +
+        line("Status", `<span class="status-badge ${success ? "ok" : "warn"}">${t.status}</span>`) +
+        line("Amount", `${t.amount} ${t.currencyIsoCode}`) +
+        line("Created", t.createdAt ? new Date(t.createdAt).toLocaleString() : "—");
+    }
+
+    function fail(msg) {
+      icon.textContent = "❌";
+      title.textContent = "Could not load purchase status";
+      sub.textContent = msg;
+      card.innerHTML = line("Reference", id || "—");
+    }
+
+    if (type === "paypal" && id) loadPayPal();
+    else if (type === "braintree" && id) loadBraintree();
+    else fail("Missing purchase reference in URL.");
+  </script>
+</body>
+</html>
