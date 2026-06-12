@@ -287,6 +287,14 @@ app.post("/api/cart/price", (req, res) => {
 /* ------------------------------------------------------------------ */
 
 /**
+ * PayPal Vault (save PayPal wallet with purchase).
+ * Demo store has no login, so buyers are identified by a browser-generated
+ * buyerId (localStorage). In-memory only — restart clears saved accounts.
+ * Map: buyerId -> { vaultId, customerId, email, name, savedAt }
+ */
+const PAYPAL_VAULTS = new Map();
+
+/**
  * Create order. Called by the JS SDK v6 button on product & cart pages
  * (ECS shortcut flow). userAction=CONTINUE -> buyer sees "Continue" in the
  * PayPal sheet and returns to our checkout page to review before capture.
@@ -356,12 +364,27 @@ app.post("/api/paypal/orders", async (req, res) => {
       };
     }
 
+    // Vault: buyer ticked "Remember my PayPal account" on the checkout page.
+    // ON_SUCCESS = vault the wallet only if the payment succeeds; the capture
+    // response then carries payment_source.paypal.attributes.vault.id, which
+    // we save against the buyerId for one-click purchases later.
+    const vaultAttributes = req.body.vault
+      ? {
+          vault: {
+            storeInVault: "ON_SUCCESS",
+            usageType: "MERCHANT",
+            customerType: "CONSUMER"
+          }
+        }
+      : undefined;
+
     const { result, ...httpResponse } = await ordersController.createOrder({
       body: {
         intent: CheckoutPaymentIntent.Capture,
         purchaseUnits: [purchaseUnit],
         paymentSource: {
           paypal: {
+            attributes: vaultAttributes,
             experienceContext: {
               brandName: "LumenX Tactical",
               // ECS: "Continue" -> review on merchant site before pay.
@@ -458,7 +481,117 @@ app.post("/api/paypal/orders/:orderId/capture", async (req, res) => {
       id: req.params.orderId,
       prefer: "return=representation"
     });
+    // Vault: if the buyer opted in at order creation (storeInVault ON_SUCCESS),
+    // the capture response carries the vault id — save it for this buyer.
+    const saved = saveVaultFromCapture(req.body && req.body.buyerId, body);
+    if (saved) {
+      const order = JSON.parse(body);
+      order.vault_saved = saved; // surface in the API console / client
+      return res.json(order);
+    }
     res.type("json").send(body);
+  } catch (err) {
+    handlePayPalError(err, res);
+  }
+});
+
+/** Extract payment_source.paypal.attributes.vault from a capture response. */
+function saveVaultFromCapture(buyerId, captureBody) {
+  if (!buyerId) return null;
+  try {
+    const order = typeof captureBody === "string" ? JSON.parse(captureBody) : captureBody;
+    const pp = order.payment_source && order.payment_source.paypal;
+    const vault = pp && pp.attributes && pp.attributes.vault;
+    if (!vault || !vault.id) return null;
+    const record = {
+      vaultId: vault.id,
+      vaultStatus: vault.status, // VAULTED, or APPROVED (pending webhook)
+      customerId: vault.customer && vault.customer.id,
+      email: pp.email_address,
+      name: pp.name ? `${pp.name.given_name || ""} ${pp.name.surname || ""}`.trim() : "",
+      savedAt: new Date().toISOString()
+    };
+    PAYPAL_VAULTS.set(buyerId, record);
+    return record;
+  } catch (e) {
+    console.warn("vault extract failed:", e.message);
+    return null;
+  }
+}
+
+/** Saved PayPal account for this buyer (checkout page asks on load). */
+app.get("/api/paypal/vault", (req, res) => {
+  const record = PAYPAL_VAULTS.get(req.query.buyerId);
+  res.json(record ? { saved: true, ...record } : { saved: false });
+});
+
+/** Forget the saved PayPal account. */
+app.delete("/api/paypal/vault", (req, res) => {
+  res.json({ removed: PAYPAL_VAULTS.delete(req.query.buyerId) });
+});
+
+/**
+ * One-click purchase with the saved PayPal wallet: create an order whose
+ * payment_source is the stored vault_id — PayPal approves it WITHOUT any
+ * buyer interaction (no sheet/popup) — then capture immediately.
+ */
+app.post("/api/paypal/vault/pay", async (req, res) => {
+  try {
+    const record = PAYPAL_VAULTS.get(req.body.buyerId);
+    if (!record) return res.status(404).json({ error: "No saved PayPal account for this buyer" });
+
+    const cart = priceCart(req.body.items, req.body.state, req.body.shippingMethod);
+    const s = req.body.shipping || {};
+    const purchaseUnit = {
+      referenceId: "default",
+      description: "LumenX Tactical order (saved PayPal account)",
+      items: cart.lineItems,
+      amount: {
+        currencyCode: "USD",
+        value: cart.total,
+        breakdown: {
+          itemTotal: { currencyCode: "USD", value: cart.itemTotal },
+          shipping: { currencyCode: "USD", value: cart.shipping },
+          taxTotal: { currencyCode: "USD", value: cart.tax }
+        }
+      }
+    };
+    if (s.streetAddress) {
+      purchaseUnit.shipping = {
+        name: { fullName: `${s.firstName || ""} ${s.lastName || ""}`.trim() || "Demo Buyer" },
+        address: {
+          addressLine1: s.streetAddress,
+          adminArea2: s.locality,
+          adminArea1: s.region,
+          postalCode: s.postalCode,
+          countryCode: s.countryCode || "US"
+        }
+      };
+    }
+
+    const { result } = await ordersController.createOrder({
+      body: {
+        intent: CheckoutPaymentIntent.Capture,
+        purchaseUnits: [purchaseUnit],
+        paymentSource: { paypal: { vaultId: record.vaultId } }
+      },
+      prefer: "return=representation"
+    });
+
+    // Vaulted orders come back APPROVED (or already COMPLETED) — no buyer step.
+    let order = result;
+    if (order.status !== "COMPLETED") {
+      const cap = await ordersController.captureOrder({
+        id: order.id,
+        prefer: "return=representation"
+      });
+      order = JSON.parse(cap.body);
+    }
+    res.json({
+      id: order.id,
+      status: order.status,
+      paidWith: { email: record.email, vaultId: record.vaultId }
+    });
   } catch (err) {
     handlePayPalError(err, res);
   }

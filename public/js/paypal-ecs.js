@@ -178,6 +178,8 @@ const PayPalECS = (() => {
    * @param {Function} [cfg.getState]          () => "CA"
    * @param {Function} [cfg.getShippingMethod] () => "standard"
    * @param {Function} [cfg.getShipping]       () => {firstName, …, countryCode}
+   * @param {Function} [cfg.getVault]           () => true  "Remember my PayPal account"
+   * @param {Function} [cfg.getBuyerId]         () => "buyer-x1y2" (vault owner key)
    * @param {string}   [cfg.buttonSelector="#paypal-paynow-btn"]
    * @param {string}   [cfg.statusSelector="#paypal-paynow-status"]
    */
@@ -206,7 +208,15 @@ const PayPalECS = (() => {
       async onApprove(data) {
         say("Capturing payment…");
         try {
-          const res = await fetch(`/api/paypal/orders/${encodeURIComponent(data.orderId)}/capture`, { method: "POST" });
+          // buyerId rides along so the server can store the vault id from the
+          // capture response ("Remember my PayPal account").
+          const res = await fetch(`/api/paypal/orders/${encodeURIComponent(data.orderId)}/capture`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              buyerId: cfg.getBuyerId ? cfg.getBuyerId() : undefined
+            })
+          });
           const cap = await res.json();
           if (!res.ok) throw new Error(JSON.stringify(cap.details || cap.error));
           Store.clearCart();
@@ -241,6 +251,10 @@ const PayPalECS = (() => {
             state: cfg.getState ? cfg.getState() : undefined,
             shippingMethod: cfg.getShippingMethod ? cfg.getShippingMethod() : undefined,
             shipping: cfg.getShipping ? cfg.getShipping() : undefined,
+            // Vault opt-in: adds attributes.vault {storeInVault: ON_SUCCESS}
+            // to the order's paypal payment source.
+            vault: cfg.getVault ? !!cfg.getVault() : false,
+            buyerId: cfg.getBuyerId ? cfg.getBuyerId() : undefined,
             returnPath: location.pathname + location.search
           })
         });

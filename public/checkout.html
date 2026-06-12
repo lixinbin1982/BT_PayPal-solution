@@ -154,12 +154,40 @@
                  address go on the order, sheet shows "Pay Now", captured
                  immediately on approve — no merchant review step. First option
                  in the list: one click, its own CTA, no Drop-in dependency. -->
-            <sdk-custom-button-wrapper funding-source="paypal">
-              <button id="paypal-paynow-btn" class="paypal-custom-btn" hidden>
-                <span class="pcb-overlay"></span>
-                <span class="pcb-content"><span class="pcb-icon">🔦</span><span>PayPal — Pay Now</span></span>
+            <!-- Saved PayPal account (vault) — shown instead of the button when
+                 this buyer has a vaulted PayPal wallet: one-click pay, no sheet. -->
+            <div id="paypal-vault-saved" class="hidden"
+                 style="border:1px solid var(--border);border-radius:10px;padding:14px;margin-bottom:12px">
+              <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">
+                <span style="font-size:22px">💙</span>
+                <div>
+                  <div style="font-weight:600">Saved PayPal account</div>
+                  <div class="muted" id="paypal-vault-email" style="font-size:13px"></div>
+                </div>
+              </div>
+              <button class="btn green block" id="paypal-vault-pay-btn">Pay with saved PayPal</button>
+              <button class="btn block" id="paypal-vault-other-btn"
+                      style="margin-top:8px;background:transparent;border:1px solid var(--border)">
+                Use another PayPal account
               </button>
-            </sdk-custom-button-wrapper>
+            </div>
+
+            <div id="paypal-paynow-wrap">
+              <!-- Vault opt-in: ON by default. Adds attributes.vault
+                   (storeInVault ON_SUCCESS) to the order so the wallet is
+                   vaulted when the payment succeeds. -->
+              <label id="paypal-vault-optin-row"
+                     style="display:flex;align-items:center;gap:8px;margin:0 0 8px;font-size:13px;cursor:pointer">
+                <input type="checkbox" id="paypal-vault-optin" checked style="accent-color:#0070ba" />
+                Remember my PayPal account for faster checkout
+              </label>
+              <sdk-custom-button-wrapper funding-source="paypal">
+                <button id="paypal-paynow-btn" class="paypal-custom-btn" hidden>
+                  <span class="pcb-overlay"></span>
+                  <span class="pcb-content"><span class="pcb-icon">🔦</span><span>PayPal — Pay Now</span></span>
+                </button>
+              </sdk-custom-button-wrapper>
+            </div>
             <div id="paypal-paynow-status" class="hidden"></div>
             <div class="pay-divider">or pay with card / wallet</div>
             <div id="dropin-container"></div>
@@ -441,17 +469,13 @@
             getItems: () => Store.cartItems(),
             getState: () => document.getElementById("ship-state").value,
             getShippingMethod: () => shipMethod,
-            getShipping: () => ({
-              firstName: document.getElementById("ship-first").value,
-              lastName: document.getElementById("ship-last").value,
-              streetAddress: document.getElementById("ship-street").value,
-              locality: document.getElementById("ship-city").value,
-              region: document.getElementById("ship-state").value,
-              postalCode: document.getElementById("ship-zip").value,
-              countryCode: "US"
-            })
+            getShipping: getShippingForm,
+            // Vault: checkbox above the button (checked by default)
+            getVault: () => document.getElementById("paypal-vault-optin").checked,
+            getBuyerId: () => buyerId
           });
         })
+        .then(initPayPalVaultUI)
         .catch((e) => console.warn("PayPal buttons unavailable:", e));
 
       // Google Pay / Apple Pay express — direct flow: shipping picked in the
@@ -462,6 +486,91 @@
       document.getElementById("ship-state").addEventListener("change", reprice);
 
       await BTCheckout.init(priced);
+    }
+
+    /* ---------- PayPal Vault (saved wallet) ---------- */
+    // Demo store has no login — identify the buyer with a persistent
+    // browser-generated id (the key the server stores the vault id under).
+    const buyerId = (() => {
+      let id = localStorage.getItem("lumenxBuyerId");
+      if (!id) {
+        id = "buyer-" + Math.random().toString(36).slice(2, 10);
+        localStorage.setItem("lumenxBuyerId", id);
+      }
+      return id;
+    })();
+
+    function getShippingForm() {
+      return {
+        firstName: document.getElementById("ship-first").value,
+        lastName: document.getElementById("ship-last").value,
+        streetAddress: document.getElementById("ship-street").value,
+        locality: document.getElementById("ship-city").value,
+        region: document.getElementById("ship-state").value,
+        postalCode: document.getElementById("ship-zip").value,
+        countryCode: "US"
+      };
+    }
+
+    // If this buyer has a vaulted PayPal wallet, show it as the payment
+    // method directly (one-click pay) instead of the PayPal button.
+    async function initPayPalVaultUI() {
+      const savedBox = document.getElementById("paypal-vault-saved");
+      const buttonWrap = document.getElementById("paypal-paynow-wrap");
+      const statusEl = document.getElementById("paypal-paynow-status");
+      const say = (msg, cls) => {
+        statusEl.textContent = msg || "";
+        statusEl.className = msg ? `alert ${cls || "info"}` : "hidden";
+      };
+
+      const vault = await fetch(`/api/paypal/vault?buyerId=${encodeURIComponent(buyerId)}`)
+        .then((r) => r.json()).catch(() => ({ saved: false }));
+      if (!vault.saved) return; // first visit: checkbox + normal button
+
+      document.getElementById("paypal-vault-email").textContent =
+        `${vault.name ? vault.name + " · " : ""}${vault.email || ""} (vault ${vault.vaultId})`;
+      savedBox.classList.remove("hidden");
+      buttonWrap.classList.add("hidden");
+
+      // One-click purchase: server creates the order with the stored
+      // vault_id (PayPal approves it without any buyer interaction) and
+      // captures immediately — no sheet, no redirect to PayPal.
+      document.getElementById("paypal-vault-pay-btn").onclick = async (e) => {
+        e.preventDefault();
+        const btn = e.currentTarget;
+        btn.disabled = true;
+        say("Paying with your saved PayPal account…");
+        try {
+          const res = await fetch("/api/paypal/vault/pay", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              buyerId,
+              items: Store.cartItems(),
+              state: document.getElementById("ship-state").value,
+              shippingMethod: shipMethod,
+              shipping: getShippingForm()
+            })
+          });
+          const data = await res.json();
+          if (!res.ok) throw new Error(JSON.stringify(data.details || data.error));
+          Store.clearCart();
+          window.location.href = `/status.html?type=paypal&id=${encodeURIComponent(data.id)}`;
+        } catch (err) {
+          say(`Payment failed: ${err.message}`, "error");
+          btn.disabled = false;
+        }
+      };
+
+      // Buyer wants to pay with a different PayPal account: bring back the
+      // normal button + remember-me checkbox (a successful payment with the
+      // checkbox ticked overwrites the saved wallet).
+      document.getElementById("paypal-vault-other-btn").onclick = (e) => {
+        e.preventDefault();
+        savedBox.classList.add("hidden");
+        buttonWrap.classList.remove("hidden");
+        say("");
+      };
     }
 
     window.addEventListener("load", () => {
