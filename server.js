@@ -575,7 +575,10 @@ app.post("/api/paypal/vault/pay", async (req, res) => {
         purchaseUnits: [purchaseUnit],
         paymentSource: { paypal: { vaultId: record.vaultId } }
       },
-      prefer: "return=representation"
+      prefer: "return=representation",
+      // Orders created WITH a payment_source (vault_id) must send an
+      // idempotency key, or PayPal rejects: PAYPAL_REQUEST_ID_REQUIRED.
+      paypalRequestId: require("crypto").randomUUID()
     });
 
     // Vaulted orders come back APPROVED (or already COMPLETED) — no buyer step.
