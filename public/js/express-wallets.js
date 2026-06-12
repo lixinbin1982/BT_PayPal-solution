@@ -354,8 +354,15 @@ const ExpressWallets = (() => {
     try {
       const apInstance = await braintree.applePay.create({ client: clientInstance });
 
-      const btn = document.createElement("button");
+      // <apple-pay-button> web component from the Apple Pay JS SDK: renders
+      // official branding in ALL browsers (CSS -webkit-appearance:
+      // -apple-pay-button only works in Safari/WebKit and shows a blank
+      // button in Chrome/Edge/Firefox).
+      const btn = document.createElement("apple-pay-button");
       btn.className = "apple-pay-btn";
+      btn.setAttribute("buttonstyle", "white");
+      btn.setAttribute("type", "check-out");
+      btn.setAttribute("locale", "en-US");
       btn.setAttribute("aria-label", "Apple Pay");
       btn.addEventListener("click", async () => {
         try {
