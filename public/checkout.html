@@ -13,6 +13,11 @@
   <script src="https://js.braintreegateway.com/web/3.142.0/js/client.min.js"></script>
   <script src="https://js.braintreegateway.com/web/3.142.0/js/data-collector.min.js"></script>
   <script src="https://js.braintreegateway.com/web/3.142.0/js/fastlane.min.js"></script>
+  <script src="https://js.braintreegateway.com/web/3.142.0/js/google-payment.min.js"></script>
+  <script src="https://js.braintreegateway.com/web/3.142.0/js/apple-pay.min.js"></script>
+  <!-- Apple Pay JS SDK (>=1.2): enables Apple Pay in third-party browsers
+       (Chrome/Edge/Firefox) via QR-code handoff to iPhone, since iOS 18 -->
+  <script crossorigin src="https://applepay.cdn-apple.com/jsapi/1.latest/apple-pay-sdk.js"></script>
   <!-- Google Pay base library (needed by Drop-in's Google Pay) -->
   <script src="https://pay.google.com/gp/p/js/pay.js"></script>
 </head>
@@ -75,6 +80,26 @@
     <div id="braintree-checkout" class="hidden">
       <div class="checkout-layout">
         <div>
+          <!-- PayPal express (JSv6 custom button — same ECS Continue flow as
+               product/cart pages; approval returns to this page in Mode A). -->
+          <div class="panel">
+            <h3><span class="step">⚡</span> Express checkout</h3>
+            <p class="muted">Pay with PayPal — you review and confirm before anything is charged.</p>
+            <br/>
+            <sdk-custom-button-wrapper funding-source="paypal">
+              <button id="paypal-custom-btn" class="paypal-custom-btn" hidden>
+                <span class="pcb-overlay"></span>
+                <span class="pcb-content"><span class="pcb-icon">🔦</span><span>PayPal</span></span>
+              </button>
+            </sdk-custom-button-wrapper>
+            <!-- Google Pay / Apple Pay express (Braintree, direct-in-sheet flow) -->
+            <div id="express-wallets" class="express-wallets">
+              <div id="googlepay-button" class="wallet-btn hidden"></div>
+              <div id="applepay-button" class="wallet-btn hidden"></div>
+            </div>
+            <div id="paypal-status" class="hidden"></div>
+          </div>
+
           <!-- Step 1: Fastlane email lookup -->
           <div class="panel" id="fastlane-section" >
             <h3><span class="step">1</span> Fastlane — accelerated checkout
@@ -123,7 +148,20 @@
           <!-- Drop-in: card / Venmo / Google Pay / Apple Pay -->
           <div class="panel">
             <h3><span class="step">3</span> Other payment methods</h3>
-            <p class="muted">Card (Drop-in), Venmo, Google Pay and Apple Pay via Braintree.</p>
+            <p class="muted">Pay directly with PayPal, or card (Drop-in), Venmo, Google Pay and Apple Pay via Braintree.</p>
+            <br/>
+            <!-- PayPal Pay Now (commit flow): final total + the form's shipping
+                 address go on the order, sheet shows "Pay Now", captured
+                 immediately on approve — no merchant review step. First option
+                 in the list: one click, its own CTA, no Drop-in dependency. -->
+            <sdk-custom-button-wrapper funding-source="paypal">
+              <button id="paypal-paynow-btn" class="paypal-custom-btn" hidden>
+                <span class="pcb-overlay"></span>
+                <span class="pcb-content"><span class="pcb-icon">🔦</span><span>PayPal — Pay Now</span></span>
+              </button>
+            </sdk-custom-button-wrapper>
+            <div id="paypal-paynow-status" class="hidden"></div>
+            <div class="pay-divider">or pay with card / wallet</div>
             <div id="dropin-container"></div>
             <div id="bt-status" class="hidden"></div>
             <button class="btn block" id="dropin-pay-btn" disabled onclick="BTCheckout.payWithDropin()">
@@ -150,6 +188,8 @@
 
   <script src="/js/store.js"></script>
   <script src="/js/api-console.js"></script>
+  <script src="/js/paypal-ecs.js"></script>
+  <script src="/js/express-wallets.js"></script>
   <script src="/js/braintree-checkout.js"></script>
   <script>
     const params = new URLSearchParams(location.search);
@@ -381,35 +421,47 @@
       const priced = await priceForState(items);
       document.getElementById("bt-summary").innerHTML = summaryHTML(priced);
       renderShipOptions(priced);
-      initPayLaterMessage(priced.total);
+
+      // Pay Later message — bootstrapped by PayPalECS.init below
+      const msg = document.createElement("paypal-message");
+      msg.setAttribute("auto-bootstrap", "");
+      msg.setAttribute("amount", priced.total);
+      msg.setAttribute("currency-code", "USD");
+      msg.style.marginTop = "14px";
+      document.getElementById("bt-summary").appendChild(msg);
+
+      // PayPal express button (JSv6 ECS Continue — same integration as
+      // product/cart pages; onApprove returns here as Mode A review), then
+      // the "PayPal — Pay Now" button in Other payment methods (commit flow:
+      // final form total + form address, captured straight from onApprove).
+      PayPalECS.init({ pageType: "checkout", getItems: () => Store.cartItems() })
+        .then(() => {
+          msg.setAttribute("amount", priced.total); msg.amount = priced.total;
+          return PayPalECS.initPayNow({
+            getItems: () => Store.cartItems(),
+            getState: () => document.getElementById("ship-state").value,
+            getShippingMethod: () => shipMethod,
+            getShipping: () => ({
+              firstName: document.getElementById("ship-first").value,
+              lastName: document.getElementById("ship-last").value,
+              streetAddress: document.getElementById("ship-street").value,
+              locality: document.getElementById("ship-city").value,
+              region: document.getElementById("ship-state").value,
+              postalCode: document.getElementById("ship-zip").value,
+              countryCode: "US"
+            })
+          });
+        })
+        .catch((e) => console.warn("PayPal buttons unavailable:", e));
+
+      // Google Pay / Apple Pay express — direct flow: shipping picked in the
+      // wallet sheet, sale submitted right after authorize (like cart page).
+      ExpressWallets.init({ getItems: () => Store.cartItems(), flow: "direct" });
 
       // Re-calculate shipping fee + tax when the buyer edits the state
       document.getElementById("ship-state").addEventListener("change", reprice);
 
       await BTCheckout.init(priced);
-    }
-
-    /* ---------- PayPal Pay Later message (v6 paypal-messages) ---------- */
-    async function initPayLaterMessage(amount) {
-      try {
-        if (!window.paypal || !window.paypal.createInstance) return;
-        const msg = document.createElement("paypal-message");
-        msg.setAttribute("auto-bootstrap", "");
-        msg.setAttribute("amount", amount);
-        msg.setAttribute("currency-code", "USD");
-        msg.style.marginTop = "14px";
-        document.getElementById("bt-summary").appendChild(msg);
-
-        const { paypalClientId } = await fetch("/api/config").then((r) => r.json());
-        const sdkInstance = await window.paypal.createInstance({
-          clientId: paypalClientId,
-          components: ["paypal-messages"],
-          pageType: "checkout"
-        });
-        sdkInstance.createPayPalMessages();
-      } catch (e) {
-        console.warn("Pay Later message unavailable:", e);
-      }
     }
 
     window.addEventListener("load", () => {

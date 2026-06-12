@@ -345,8 +345,12 @@ const ExpressWallets = (() => {
 
   /* ----------------------- Apple Pay ----------------------- */
   async function initApplePay(container) {
-    // Shows only in Safari on Apple devices over HTTPS with a verified domain.
-    if (!window.ApplePaySession || !ApplePaySession.canMakePayments()) return;
+    // Safari exposes ApplePaySession natively; in third-party browsers
+    // (Chrome/Edge/Firefox) it comes from the Apple Pay JS SDK script
+    // (apple-pay-sdk.js), which since iOS 18 supports a QR-code handoff to
+    // the buyer's iPhone. Either way: HTTPS + verified domain required.
+    if (!window.ApplePaySession) return;
+    if (!ApplePaySession.canMakePayments()) return;
     try {
       const apInstance = await braintree.applePay.create({ client: clientInstance });
 

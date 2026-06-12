@@ -105,6 +105,15 @@ const gateway = new braintree.BraintreeGateway({
 const app = express();
 app.use(express.json());
 app.use(express.static(path.join(__dirname, "public")));
+// Apple Pay domain verification: Apple fetches
+// /.well-known/apple-developer-merchantid-domain-association when you
+// register the domain in the Braintree control panel. express.static
+// ignores dot-directories by default, so serve .well-known explicitly
+// (drop the file from the Braintree control panel into public/.well-known/).
+app.use(
+  "/.well-known",
+  express.static(path.join(__dirname, "public", ".well-known"), { dotfiles: "allow" })
+);
 
 /* ------------------------------------------------------------------ */
 /*  API history console: in-memory log of every /api/* call            */
@@ -285,10 +294,19 @@ app.post("/api/cart/price", (req, res) => {
  */
 app.post("/api/paypal/orders", async (req, res) => {
   try {
-    const cart = priceCart(req.body.items);
-    // ECS: the order is created with the ITEM TOTAL only. Shipping & tax are
-    // calculated AFTER approval from the shipping address on the buyer's
-    // PayPal account, and the order amount is patched before capture.
+    // Two flavors:
+    //  - ECS (default): ITEM TOTAL only, userAction CONTINUE. Shipping & tax
+    //    are calculated AFTER approval from the address on the buyer's PayPal
+    //    account, and the order amount is patched before capture.
+    //  - Pay Now (flow:"paynow", checkout page "Other payment methods"):
+    //    FINAL total (items + shipping + tax from the checkout form) and the
+    //    form's shipping address; userAction PAY_NOW, captured in onApprove.
+    const payNow = req.body.flow === "paynow";
+    const cart = priceCart(
+      req.body.items,
+      payNow ? req.body.state : undefined,
+      payNow ? req.body.shippingMethod : undefined
+    );
     //
     // App Switch: the PayPal app reopens returnUrl WITHOUT a ?token= param,
     // so the return must go back to the page that STARTED the session — the
@@ -300,29 +318,58 @@ app.post("/api/paypal/orders", async (req, res) => {
         ? rp
         : "/checkout.html";
     const sep = returnPath.includes("?") ? "&" : "?";
+
+    const purchaseUnit = {
+      referenceId: "default",
+      description: "LumenX Tactical order",
+      items: cart.lineItems,
+      amount: payNow
+        ? {
+            currencyCode: "USD",
+            value: cart.total, // final: items + shipping + tax
+            breakdown: {
+              itemTotal: { currencyCode: "USD", value: cart.itemTotal },
+              shipping: { currencyCode: "USD", value: cart.shipping },
+              taxTotal: { currencyCode: "USD", value: cart.tax }
+            }
+          }
+        : {
+            currencyCode: "USD",
+            value: cart.itemTotal,
+            breakdown: {
+              itemTotal: { currencyCode: "USD", value: cart.itemTotal }
+            }
+          }
+    };
+    // Pay Now: ship to the address typed into the checkout form
+    const s = req.body.shipping || {};
+    if (payNow && s.streetAddress) {
+      purchaseUnit.shipping = {
+        name: { fullName: `${s.firstName || ""} ${s.lastName || ""}`.trim() || "Demo Buyer" },
+        address: {
+          addressLine1: s.streetAddress,
+          adminArea2: s.locality,
+          adminArea1: s.region,
+          postalCode: s.postalCode,
+          countryCode: s.countryCode || "US"
+        }
+      };
+    }
+
     const { result, ...httpResponse } = await ordersController.createOrder({
       body: {
         intent: CheckoutPaymentIntent.Capture,
-        purchaseUnits: [
-          {
-            referenceId: "default",
-            description: "LumenX Tactical order",
-            items: cart.lineItems,
-            amount: {
-              currencyCode: "USD",
-              value: cart.itemTotal,
-              breakdown: {
-                itemTotal: { currencyCode: "USD", value: cart.itemTotal }
-              }
-            }
-          }
-        ],
+        purchaseUnits: [purchaseUnit],
         paymentSource: {
           paypal: {
             experienceContext: {
               brandName: "LumenX Tactical",
-              userAction: "CONTINUE", // ECS: review on merchant site before pay
-              shippingPreference: "GET_FROM_FILE",
+              // ECS: "Continue" -> review on merchant site before pay.
+              // Pay Now: final total in the sheet, capture right after approve.
+              userAction: payNow ? "PAY_NOW" : "CONTINUE",
+              shippingPreference: payNow
+                ? (purchaseUnit.shipping ? "SET_PROVIDED_ADDRESS" : "NO_SHIPPING")
+                : "GET_FROM_FILE",
               returnUrl: `${baseUrl(req)}${returnPath}${sep}paypalReturn=true`,
               cancelUrl: `${baseUrl(req)}/cart.html?paypalCancel=true`
             }

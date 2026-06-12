@@ -230,9 +230,20 @@ const BTCheckout = (() => {
             requiredBillingContactFields: ["postalAddress"]
           }
         },
-        // Cards
+        // Cards. The number/expiry/CVV inputs live in Braintree-hosted
+        // iframes — page CSS can't reach them, so the input text/placeholder
+        // colors for the dark theme are set here (chrome around them is
+        // themed in style.css ".braintree-dropin" overrides).
         card: {
-          cardholderName: { required: false }
+          cardholderName: { required: false },
+          overrides: {
+            styles: {
+              input: { color: "#e6edf3", "font-size": "15px" },
+              "::placeholder": { color: "#8b97a5" },
+              ":focus": { color: "#e6edf3" },
+              ".invalid": { color: "#ff5b5b" }
+            }
+          }
         }
       });
     } catch (err) {

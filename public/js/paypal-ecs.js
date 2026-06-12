@@ -15,6 +15,7 @@
  */
 const PayPalECS = (() => {
   let session = null;
+  let sdkInstance = null; // shared between the ECS and Pay Now buttons
   let lastGetItems = null;
 
   const isMobile = () =>
@@ -87,7 +88,7 @@ const PayPalECS = (() => {
 
     const { paypalClientId } = await fetch("/api/config").then((r) => r.json());
 
-    const sdkInstance = await window.paypal.createInstance({
+    sdkInstance = await window.paypal.createInstance({
       clientId: paypalClientId,
       components: ["paypal-payments", "paypal-messages"],
       pageType: cfg.pageType
@@ -165,5 +166,96 @@ const PayPalECS = (() => {
     });
   }
 
-  return { init, updateMessageAmount };
+  /**
+   * Pay Now flow (commit:true) — used in the checkout page's "Other payment
+   * methods" list. Unlike ECS, the order is created with the FINAL total
+   * (items + shipping + tax from the checkout form) and the form's shipping
+   * address; the PayPal sheet shows "Pay Now" and the payment is captured
+   * immediately in onApprove — no merchant review page.
+   *
+   * @param {Object} cfg
+   * @param {Function} cfg.getItems           () => [{id, qty}]
+   * @param {Function} [cfg.getState]          () => "CA"
+   * @param {Function} [cfg.getShippingMethod] () => "standard"
+   * @param {Function} [cfg.getShipping]       () => {firstName, …, countryCode}
+   * @param {string}   [cfg.buttonSelector="#paypal-paynow-btn"]
+   * @param {string}   [cfg.statusSelector="#paypal-paynow-status"]
+   */
+  async function initPayNow(cfg) {
+    const btn = document.querySelector(cfg.buttonSelector || "#paypal-paynow-btn");
+    if (!btn) return;
+    const statusEl = document.querySelector(cfg.statusSelector || "#paypal-paynow-status");
+    const say = (msg, cls) => {
+      if (!statusEl) return;
+      statusEl.textContent = msg || "";
+      statusEl.className = msg ? `alert ${cls || "info"}` : "hidden";
+    };
+
+    if (!window.paypal || !window.paypal.createInstance) return;
+    if (!sdkInstance) {
+      const { paypalClientId } = await fetch("/api/config").then((r) => r.json());
+      sdkInstance = await window.paypal.createInstance({
+        clientId: paypalClientId,
+        components: ["paypal-payments", "paypal-messages"],
+        pageType: "checkout"
+      });
+    }
+
+    const payNowSession = sdkInstance.createPayPalOneTimePaymentSession({
+      // commit defaults to true -> the sheet shows "Pay Now"
+      async onApprove(data) {
+        say("Capturing payment…");
+        try {
+          const res = await fetch(`/api/paypal/orders/${encodeURIComponent(data.orderId)}/capture`, { method: "POST" });
+          const cap = await res.json();
+          if (!res.ok) throw new Error(JSON.stringify(cap.details || cap.error));
+          Store.clearCart();
+          window.location.href = `/status.html?type=paypal&id=${encodeURIComponent(data.orderId)}`;
+        } catch (err) {
+          say(`Capture failed: ${err.message}`, "error");
+        }
+      },
+      onCancel() {
+        say("PayPal checkout was cancelled. Nothing was charged.", "info");
+      },
+      onError(err) {
+        console.error("PayPal Pay Now error:", err);
+        say(`PayPal error: ${err && err.message ? err.message : err}`, "error");
+      }
+    });
+
+    btn.removeAttribute("hidden");
+    btn.addEventListener("click", async () => {
+      say("", "");
+      if (!cfg.getItems().length) {
+        say("Your cart is empty.", "error");
+        return;
+      }
+      const orderPromise = (async () => {
+        const res = await fetch("/api/paypal/orders", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            flow: "paynow",
+            items: cfg.getItems(),
+            state: cfg.getState ? cfg.getState() : undefined,
+            shippingMethod: cfg.getShippingMethod ? cfg.getShippingMethod() : undefined,
+            shipping: cfg.getShipping ? cfg.getShipping() : undefined,
+            returnPath: location.pathname + location.search
+          })
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || "Order creation failed");
+        return { orderId: data.id };
+      })();
+      try {
+        await payNowSession.start({ presentationMode: "auto" }, orderPromise);
+      } catch (err) {
+        console.error("PayPal Pay Now start failed:", err);
+        say(`Unable to open PayPal: ${err && err.message ? err.message : err}`, "error");
+      }
+    });
+  }
+
+  return { init, initPayNow, updateMessageAmount };
 })();

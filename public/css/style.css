@@ -233,6 +233,76 @@ sdk-custom-button-wrapper { display: block; width: 100%; max-width: 420px; }
 
 footer { border-top: 1px solid var(--border); padding: 26px 20px; text-align: center; color: var(--text-dim); font-size: 13px; }
 
+/* ------------------------------------------------------------------ */
+/* Braintree Drop-in — dark theme overrides so the widget matches the  */
+/* site. The widget chrome is normal DOM (safe to restyle); the card   */
+/* number/expiry/CVV inputs are iframes whose inner text is styled via */
+/* card.overrides.styles in dropin.create (braintree-checkout.js).     */
+/* ------------------------------------------------------------------ */
+.braintree-dropin {
+  font-family: "Segoe UI", -apple-system, BlinkMacSystemFont, Roboto, Helvetica, Arial, sans-serif;
+  color: var(--text);
+}
+.braintree-dropin .braintree-heading { color: var(--text-dim); }
+
+/* Payment-method chooser rows (Card / Venmo / Google Pay / Apple Pay) */
+.braintree-dropin .braintree-options-list { border-radius: 10px; overflow: hidden; }
+.braintree-dropin .braintree-option {
+  background: var(--bg-elev);
+  border-color: var(--border);
+}
+.braintree-dropin .braintree-option:hover { background: var(--bg-card); }
+.braintree-dropin .braintree-option .braintree-option__label { color: var(--text); }
+
+/* Selected / saved payment method tile */
+.braintree-dropin .braintree-method {
+  background: var(--bg-elev);
+  border-color: var(--border);
+}
+.braintree-dropin .braintree-method .braintree-method__label { color: var(--text); }
+.braintree-dropin .braintree-method .braintree-method__label .braintree-method__label--small { color: var(--text-dim); }
+.braintree-dropin .braintree-method--active {
+  background: var(--bg-elev);
+  border-color: var(--accent);
+}
+
+/* Card form sheet */
+.braintree-dropin .braintree-sheet {
+  background: var(--bg-elev);
+  border-color: var(--border);
+}
+.braintree-dropin .braintree-sheet__header {
+  background: var(--bg-elev);
+  border-bottom-color: var(--border);
+}
+.braintree-dropin .braintree-sheet__header .braintree-sheet__text,
+.braintree-dropin .braintree-sheet__header .braintree-sheet__label { color: var(--text); }
+.braintree-dropin .braintree-form__label,
+.braintree-dropin .braintree-form__descriptor { color: var(--text-dim); }
+.braintree-dropin .braintree-form__hosted-field {
+  background: var(--bg);
+  border-color: var(--border);
+}
+.braintree-dropin .braintree-form__field-group--has-error .braintree-form__hosted-field { border-color: var(--red); }
+.braintree-dropin .braintree-form__field-error { color: var(--red); }
+
+/* "Choose another way to pay" toggle */
+.braintree-dropin .braintree-toggle {
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+.braintree-dropin .braintree-toggle span {
+  color: var(--accent-2);
+  border-bottom-color: var(--accent-2);
+}
+.braintree-dropin .braintree-large-button { background: var(--bg-elev); }
+.braintree-dropin .braintree-large-button span { color: var(--accent-2); border-bottom-color: var(--accent-2); }
+
+/* Misc: loaders / placeholders / sheet errors on dark */
+.braintree-dropin .braintree-placeholder { color: var(--text-dim); }
+.braintree-dropin .braintree-sheet__error .braintree-sheet__error-text { color: var(--red); }
+
 @media (max-width: 860px) {
   .product-layout, .cart-layout, .checkout-layout { grid-template-columns: 1fr; }
   .hero { padding: 36px 24px; }
